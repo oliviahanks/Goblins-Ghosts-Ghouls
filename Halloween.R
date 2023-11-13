@@ -10,7 +10,18 @@ test_data <- vroom("./test.csv")
 
 folds <- vfold_cv(train_data, v = 5, repeats = 1)
 
-# imputation
+# Main Recipe
+nn_recipe <- recipe(type ~., data = train_data) %>%
+  step_mutate(color = as.factor(color)) %>%
+  step_mutate(type = as.factor(type), skip = TRUE) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
+  prep()
+
+
+################################
+### imputation
+################################
 
 my_rec <- recipe(type ~ ., data=halloween) %>% # Set model formula and dataset
   step_impute_linear(bone_length, impute_with=imp_vars('has_soul', 'color', 'type')) %>%
@@ -24,18 +35,10 @@ rmse_vec(train_data[is.na(halloween)], testbake[is.na(halloween)])
 
 sapply(halloween, class)
 
+################################
+### Neural Network
+################################
 
-
-
-
-
-nn_recipe <- recipe(type ~., data = train_data) %>%
-  step_mutate(color = as.factor(color)) %>%
-  step_mutate(type = as.factor(type), skip = TRUE) %>%
-  step_dummy(all_nominal_predictors()) %>%
-  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
-  prep()
-  
 nn_model <- mlp(hidden_units = tune(),
                 epochs = 300) %>%
   set_engine("nnet") %>%
@@ -75,8 +78,9 @@ ggg_predictions_nn <- nn_predictions %>%
 
 vroom_write(x=ggg_predictions_nn, file="./nn.csv", delim=",")
 
-
-
+################################
+### Boost
+################################
 
 boost_model <- boost_tree(tree_depth=tune(),
 trees=tune(),
@@ -84,10 +88,7 @@ learn_rate=tune()) %>%
 set_engine("lightgbm") %>% #or "xgboost" but lightgbm is faster
 set_mode("classification")
 
-
-
 ## CV tune, finalize and predict here and save results
-## Boost
 
 boost_wf <- workflow() %>%
   add_recipe(nn_recipe) %>%
@@ -125,7 +126,11 @@ ggg_predictions_boost <- boost_predictions %>%
 
 vroom_write(x=ggg_predictions_boost, file="./boost.csv", delim=",")
 
-## Bart
+
+################################
+### Bart
+################################
+
 bart_model <- bart(trees=tune()) %>% # BART figures out depth and learn_rate
 set_engine("dbarts") %>% # might need to install
 set_mode("classification")
@@ -140,10 +145,6 @@ bart_results_tune <- bart_wf %>%
   tune_grid(resamples = folds,
             grid = bart_tune_grid,
             metrics = metric_set(accuracy))
-
-#bart_results_tune %>% collect_metrics() %>%
-#  filter(.metric=="accuracy") %>%
-#  ggplot(aes(x=hidden_units, y=mean)) + geom_line()
 
 bestTune_bart <- bart_results_tune %>%
   select_best("accuracy")
